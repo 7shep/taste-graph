@@ -142,7 +142,11 @@ export function useGraphData(
       setError(null);
 
       try {
-        const payload = await fetchGraphPayload(timeRange, controller.signal);
+        const payload = await fetchGraphPayload(
+          timeRange,
+          controller.signal,
+          refreshToken > 0,
+        );
         setData(normalizePayload(payload));
         setSource("api");
         setStatus("success");

@@ -43,6 +43,7 @@ export interface GraphEdge {
   source: string;
   target: string;
   weight: number;
+  kind?: "listening" | "genre";
 }
 
 export interface GraphCluster {

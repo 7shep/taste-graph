@@ -17,18 +17,226 @@ from backend.models.schemas import (
     SessionRecord,
     UserRecord,
 )
-from backend.services.clustering import cluster_artist_embeddings
-from backend.services.embeddings import EmbeddingResult, train_artist_embeddings
+from backend.services.clustering import (
+    ClusterRecord,
+    ClusteringResult,
+    UNCATEGORIZED_COLOR,
+    cluster_artist_embeddings,
+)
+from backend.services.embeddings import (
+    EmbeddingResult,
+    expand_genre_tokens,
+    train_artist_embeddings,
+)
 from backend.services.labeling import ClusterLabelingService
 from backend.services.spotify import SpotifyAPIError, SpotifyService, segment_sessions
+
+
+GENRE_EDGE_MIN_SIMILARITY = 0.2
+GENRE_ASSIGN_MIN_SIMILARITY = 0.2
+GENRE_EDGE_MAX_PER_NODE = 3
+GENRE_EDGE_MIN_WEIGHT = 0.05
+GENRE_EDGE_MAX_WEIGHT = 0.25
+ARTIST_RANK_SCORE_MAX = 1000
+ARTIST_RANK_SCORE_MIN = 80
+TRACK_RANK_SCORE_MAX = 100
+TRACK_RANK_SCORE_MIN = 10
 
 
 class GraphGenerationError(RuntimeError):
     pass
 
 
+def _jaccard(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0.0
+    return len(left & right) / len(left | right)
+
+
+def _genre_edges_for_orphans(
+    artist_ids: list[str],
+    genres_by_artist: dict[str, list[str]],
+    listening_edges: list[GraphEdge],
+) -> list[GraphEdge]:
+    """Give zero-edge nodes faint edges to their closest genre relatives."""
+    connected: set[str] = set()
+    for edge in listening_edges:
+        connected.add(edge.source)
+        connected.add(edge.target)
+
+    token_sets = {
+        artist_id: set(expand_genre_tokens(genres_by_artist.get(artist_id, [])))
+        for artist_id in artist_ids
+    }
+
+    genre_edges: list[GraphEdge] = []
+    seen_pairs: set[tuple[str, str]] = set()
+    for artist_id in artist_ids:
+        if artist_id in connected:
+            continue
+        tokens = token_sets[artist_id]
+        if not tokens:
+            continue
+
+        scored = sorted(
+            (
+                (_jaccard(tokens, token_sets[other_id]), other_id)
+                for other_id in artist_ids
+                if other_id != artist_id
+            ),
+            reverse=True,
+        )
+        for similarity, other_id in scored[:GENRE_EDGE_MAX_PER_NODE]:
+            if similarity < GENRE_EDGE_MIN_SIMILARITY:
+                break
+            pair = tuple(sorted((artist_id, other_id)))
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            weight = GENRE_EDGE_MIN_WEIGHT + (
+                GENRE_EDGE_MAX_WEIGHT - GENRE_EDGE_MIN_WEIGHT
+            ) * min(1.0, similarity)
+            genre_edges.append(
+                GraphEdge(
+                    source=pair[0],
+                    target=pair[1],
+                    weight=round(weight, 4),
+                    kind="genre",
+                )
+            )
+
+    return genre_edges
+
+
+def _assign_uncategorized_by_genre(
+    clustering_result: ClusteringResult,
+    genres_by_artist: dict[str, list[str]],
+) -> int:
+    """Move HDBSCAN noise into an existing cluster when genres clearly match."""
+    token_sets = {
+        artist_id: set(expand_genre_tokens(genres_by_artist.get(artist_id, [])))
+        for artist_id in clustering_result.cluster_ids
+    }
+
+    cluster_members: dict[str, list[str]] = defaultdict(list)
+    for artist_id, cluster_id in clustering_result.cluster_ids.items():
+        if cluster_id != "uncategorized":
+            cluster_members[cluster_id].append(artist_id)
+
+    if not cluster_members:
+        return 0
+
+    assignments = 0
+    for artist_id, cluster_id in list(clustering_result.cluster_ids.items()):
+        if cluster_id != "uncategorized":
+            continue
+
+        tokens = token_sets[artist_id]
+        if not tokens:
+            continue
+
+        best_similarity = 0.0
+        best_cluster_id: str | None = None
+        for candidate_cluster_id, member_ids in cluster_members.items():
+            similarity = max(
+                (_jaccard(tokens, token_sets[member_id]) for member_id in member_ids),
+                default=0.0,
+            )
+            if similarity > best_similarity:
+                best_similarity = similarity
+                best_cluster_id = candidate_cluster_id
+
+        if best_cluster_id and best_similarity >= GENRE_ASSIGN_MIN_SIMILARITY:
+            clustering_result.cluster_ids[artist_id] = best_cluster_id
+            cluster_members[best_cluster_id].append(artist_id)
+            assignments += 1
+
+    if assignments:
+        _sync_cluster_sizes(clustering_result)
+
+    return assignments
+
+
+def _sync_cluster_sizes(clustering_result: ClusteringResult) -> None:
+    counts: dict[str, int] = defaultdict(int)
+    for cluster_id in clustering_result.cluster_ids.values():
+        counts[cluster_id] += 1
+
+    existing = {cluster.id: cluster for cluster in clustering_result.clusters}
+    ordered_cluster_ids = [
+        cluster.id
+        for cluster in clustering_result.clusters
+        if cluster.id != "uncategorized" and counts.get(cluster.id, 0) > 0
+    ]
+    ordered_cluster_ids.extend(
+        sorted(
+            cluster_id
+            for cluster_id in counts
+            if cluster_id != "uncategorized" and cluster_id not in ordered_cluster_ids
+        )
+    )
+
+    clusters: list[ClusterRecord] = []
+    for cluster_id in ordered_cluster_ids:
+        current = existing.get(cluster_id)
+        if current:
+            clusters.append(
+                ClusterRecord(
+                    id=current.id,
+                    label=current.label,
+                    color=current.color,
+                    size=counts[cluster_id],
+                )
+            )
+
+    if counts.get("uncategorized", 0) > 0:
+        current = existing.get("uncategorized")
+        clusters.append(
+            ClusterRecord(
+                id="uncategorized",
+                label=current.label if current else "Uncategorized",
+                color=current.color if current else UNCATEGORIZED_COLOR,
+                size=counts["uncategorized"],
+            )
+        )
+
+    clustering_result.clusters = clusters
+
+
 def _parse_played_at(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+
+
+def _rank_score(index: int, total: int, *, minimum: int, maximum: int) -> int:
+    if total <= 1:
+        return maximum
+    ratio = 1.0 - (index / (total - 1))
+    return round(minimum + (maximum - minimum) * ratio)
+
+
+def _artist_score_by_rank(
+    top_artists: list[dict[str, Any]], play_counts: dict[str, int]
+) -> dict[str, int]:
+    scores: dict[str, int] = {}
+    total = len(top_artists)
+    for index, artist in enumerate(top_artists):
+        artist_id = str(artist.get("id") or "")
+        if not artist_id:
+            continue
+        scores[artist_id] = _rank_score(
+            index,
+            total,
+            minimum=ARTIST_RANK_SCORE_MIN,
+            maximum=ARTIST_RANK_SCORE_MAX,
+        )
+
+    # Recent plays are exact observations, but Spotify only exposes a small
+    # recent window. Add them as a tie-breaker without pretending they are
+    # lifetime totals.
+    for artist_id, count in play_counts.items():
+        scores[artist_id] = scores.get(artist_id, 0) + count
+
+    return scores
 
 
 def _build_session_records(
@@ -80,13 +288,21 @@ def _build_session_records(
 
 def _top_tracks_by_artist(top_tracks: list[dict[str, Any]]) -> dict[str, list[GraphTrack]]:
     tracks_by_artist: dict[str, list[GraphTrack]] = defaultdict(list)
-    for track in top_tracks:
+    total = len(top_tracks)
+    for index, track in enumerate(top_tracks):
         artists = track.get("artists", []) or []
         album = track.get("album", {}) or {}
+        popularity = int(track.get("popularity") or 0)
+        rank_score = _rank_score(
+            index,
+            total,
+            minimum=TRACK_RANK_SCORE_MIN,
+            maximum=TRACK_RANK_SCORE_MAX,
+        )
         graph_track = GraphTrack(
             title=str(track.get("name") or "Unknown Track"),
             subtitle=str(album.get("name") or "") or None,
-            play_count=int(track.get("popularity") or 0),
+            play_count=max(popularity, rank_score),
         )
         for artist in artists:
             artist_id = str(artist.get("id") or "")
@@ -98,13 +314,15 @@ def _top_tracks_by_artist(top_tracks: list[dict[str, Any]]) -> dict[str, list[Gr
 def _artist_metadata(
     recently_played_items: list[dict[str, Any]],
     top_artists: list[dict[str, Any]],
+    fetched_artists: list[dict[str, Any]],
     top_tracks: list[dict[str, Any]],
     embedding_result: EmbeddingResult,
 ) -> dict[str, dict[str, Any]]:
     metadata: dict[str, dict[str, Any]] = {}
     tracks_by_artist = _top_tracks_by_artist(top_tracks)
+    artist_scores = _artist_score_by_rank(top_artists, embedding_result.play_counts)
 
-    for artist in top_artists:
+    for artist in [*top_artists, *fetched_artists]:
         artist_id = str(artist.get("id") or "")
         if not artist_id:
             continue
@@ -113,7 +331,7 @@ def _artist_metadata(
             "name": str(artist.get("name") or artist_id),
             "image_url": ((artist.get("images") or [{}])[0] or {}).get("url"),
             "genres": artist.get("genres", []) or [],
-            "play_count": embedding_result.play_counts.get(artist_id, 0),
+            "play_count": artist_scores.get(artist_id, 0),
             "top_tracks": tracks_by_artist.get(artist_id, []),
         }
 
@@ -132,15 +350,16 @@ def _artist_metadata(
                     "name": str(artist.get("name") or artist_id),
                     "image_url": image_url,
                     "genres": [],
-                    "play_count": 0,
+                    "play_count": artist_scores.get(artist_id, 0),
                     "top_tracks": tracks_by_artist.get(artist_id, []),
                 },
             )
-            existing["play_count"] = embedding_result.play_counts.get(artist_id, 0)
+            existing["play_count"] = artist_scores.get(artist_id, 0)
             if not existing.get("image_url"):
                 existing["image_url"] = image_url
 
     for artist_id, play_count in embedding_result.play_counts.items():
+        score = artist_scores.get(artist_id, play_count)
         metadata.setdefault(
             artist_id,
             {
@@ -148,7 +367,7 @@ def _artist_metadata(
                 "name": artist_id,
                 "image_url": None,
                 "genres": [],
-                "play_count": play_count,
+                "play_count": score,
                 "top_tracks": tracks_by_artist.get(artist_id, []),
             },
         )
@@ -197,9 +416,11 @@ class GraphPipeline:
             if cached is not None:
                 return cached
 
+        access_token = request.access_token
+
         try:
             user_profile, top_artists, top_tracks, recently_played = self._fetch_spotify_bundle(
-                request.access_token, request.time_range
+                access_token, request.time_range
             )
         except SpotifyAPIError as exc:
             if exc.status_code == 401 and request.refresh_token:
@@ -210,9 +431,10 @@ class GraphPipeline:
                     refreshed_access_token = str(refreshed.get("access_token") or "")
                     if not refreshed_access_token:
                         raise GraphGenerationError("Spotify token refresh failed")
+                    access_token = refreshed_access_token
                     user_profile, top_artists, top_tracks, recently_played = (
                         self._fetch_spotify_bundle(
-                            refreshed_access_token, request.time_range
+                            access_token, request.time_range
                         )
                     )
                 except (SpotifyAPIError, GraphGenerationError) as refresh_exc:
@@ -233,10 +455,42 @@ class GraphPipeline:
         session_records = _build_session_records(request.user_id, recently_played)
         self.repository.replace_sessions(request.user_id, session_records)
 
-        embedding_result = train_artist_embeddings(session_sequences, top_artists)
+        known_artist_ids = {str(artist.get("id") or "") for artist in top_artists}
+        session_artist_ids = {
+            artist_id for session in session_sequences for artist_id in session
+        }
+        track_artist_ids = {
+            str(artist.get("id") or "")
+            for track in top_tracks
+            for artist in track.get("artists", []) or []
+        }
+        missing_ids = sorted(
+            (session_artist_ids | track_artist_ids) - known_artist_ids - {""}
+        )
+
+        fetched_artists: list[dict[str, Any]] = []
+        if missing_ids:
+            try:
+                fetched_artists = self.spotify_service.get_artists(
+                    access_token, missing_ids
+                )
+            except SpotifyAPIError:
+                # Genres enrich graph placement; generation should not fail on them.
+                fetched_artists = []
+
+        genres_by_artist: dict[str, list[str]] = {}
+        for artist in [*top_artists, *fetched_artists]:
+            artist_id = str(artist.get("id") or "")
+            if artist_id:
+                genres_by_artist[artist_id] = list(artist.get("genres", []) or [])
+
+        embedding_result = train_artist_embeddings(session_sequences, genres_by_artist)
         clustering_result = cluster_artist_embeddings(embedding_result.vectors)
+        genre_assignments = _assign_uncategorized_by_genre(
+            clustering_result, genres_by_artist
+        )
         artist_metadata = _artist_metadata(
-            recently_played, top_artists, top_tracks, embedding_result
+            recently_played, top_artists, fetched_artists, top_tracks, embedding_result
         )
 
         cluster_members: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -277,13 +531,19 @@ class GraphPipeline:
                 )
             )
 
+        listening_edges = _normalize_edge_weights(embedding_result.edge_weights)
+        genre_edges = _genre_edges_for_orphans(
+            sorted(artist_metadata), genres_by_artist, listening_edges
+        )
+        all_edges = [*listening_edges, *genre_edges]
+
         payload = GraphPayload(
             nodes=nodes,
-            edges=_normalize_edge_weights(embedding_result.edge_weights),
+            edges=all_edges,
             clusters=clusters,
             stats=GraphStats(
                 artists=len(nodes),
-                edges=len(embedding_result.edge_weights),
+                edges=len(all_edges),
                 clusters=len(clusters),
             ),
             metadata={
@@ -291,6 +551,7 @@ class GraphPipeline:
                 "fallback_used": embedding_result.fallback_used
                 or clustering_result.fallback_used,
                 "fallback_reasons": embedding_result.fallback_reasons,
+                "genre_assignments": genre_assignments,
             },
         )
 

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from itertools import combinations
 from math import sqrt
 from typing import Iterable
+from zlib import crc32
 
 try:
     from gensim.models import Word2Vec
@@ -16,6 +17,46 @@ VECTOR_SIZE = 64
 WINDOW_SIZE = 3
 MIN_COUNT = 1
 SKIP_GRAM = 1
+GENRE_BLEND_RATIO = 0.3
+
+# Keyword to parent-genre rules. A Spotify sub-genre containing any keyword on
+# the left emits every parent token on the right, so "uk drill" and "rage rap"
+# both attract toward "hip hop" even with zero shared listening sessions.
+PARENT_GENRE_RULES: list[tuple[tuple[str, ...], tuple[str, ...]]] = [
+    (("hip hop", "rap"), ("hip hop",)),
+    (("drill",), ("drill", "hip hop")),
+    (("trap",), ("trap", "hip hop")),
+    (("indie",), ("indie",)),
+    (("rock",), ("rock",)),
+    (("metal",), ("metal", "rock")),
+    (("punk",), ("punk", "rock")),
+    (("pop",), ("pop",)),
+    (("r&b", "soul"), ("r&b",)),
+    (
+        ("house", "techno", "edm", "electronic", "dubstep", "drum and bass", "dnb"),
+        ("electronic",),
+    ),
+    (("country",), ("country",)),
+    (("jazz",), ("jazz",)),
+    (("latin", "reggaeton", "corrido"), ("latin",)),
+    (("folk", "americana"), ("folk",)),
+    (("classical", "orchestral"), ("classical",)),
+]
+
+
+def expand_genre_tokens(genres: list[str]) -> list[str]:
+    tokens: list[str] = []
+    parents: set[str] = set()
+    for genre in genres:
+        normalized = genre.strip().lower()
+        if not normalized:
+            continue
+        tokens.append(f"genre:{normalized}")
+        for keywords, parent_names in PARENT_GENRE_RULES:
+            if any(keyword in normalized for keyword in keywords):
+                parents.update(parent_names)
+    tokens.extend(sorted(f"parent:{parent}" for parent in parents))
+    return tokens
 
 
 @dataclass
@@ -33,12 +74,26 @@ def _normalize(values: list[float]) -> list[float]:
 
 
 def _hash_bucket(token: str, size: int) -> int:
-    return abs(hash(token)) % size
+    # crc32 instead of hash(): the built-in is salted per process
+    # (PYTHONHASHSEED), which would make embeddings non-deterministic
+    # across server restarts.
+    return crc32(token.encode("utf-8")) % size
 
 
-def _cooccurrence_vectors(
-    sessions: list[list[str]], top_artists: list[dict[str, object]] | None = None
-) -> dict[str, list[float]]:
+def _genre_vectors(genres_by_artist: dict[str, list[str]]) -> dict[str, list[float]]:
+    vectors: dict[str, list[float]] = {}
+    for artist_id, genres in genres_by_artist.items():
+        tokens = expand_genre_tokens(genres)
+        if not tokens:
+            continue
+        bucketed = [0.0] * VECTOR_SIZE
+        for token in tokens:
+            bucketed[_hash_bucket(token, VECTOR_SIZE)] += 1.0
+        vectors[artist_id] = _normalize(bucketed)
+    return vectors
+
+
+def _cooccurrence_vectors(sessions: list[list[str]]) -> dict[str, list[float]]:
     context: dict[str, Counter[str]] = defaultdict(Counter)
 
     for session in sessions:
@@ -53,13 +108,6 @@ def _cooccurrence_vectors(
         for artist_a, artist_b in combinations(unique_session, 2):
             context[artist_a][f"pair:{artist_b}"] += 1
             context[artist_b][f"pair:{artist_a}"] += 1
-
-    for artist in top_artists or []:
-        artist_id = str(artist.get("id") or "")
-        if not artist_id:
-            continue
-        for genre in artist.get("genres", []) or []:
-            context[artist_id][f"genre:{genre}"] += 3
 
     vectors: dict[str, list[float]] = {}
     for artist_id, tokens in context.items():
@@ -118,7 +166,7 @@ def _count_edge_weights(sessions: Iterable[list[str]]) -> dict[tuple[str, str], 
 
 def train_artist_embeddings(
     sessions: list[list[str]],
-    top_artists: list[dict[str, object]] | None = None,
+    genres_by_artist: dict[str, list[str]] | None = None,
 ) -> EmbeddingResult:
     sanitized_sessions = [
         [artist_id for artist_id in session if artist_id]
@@ -146,30 +194,24 @@ def train_artist_embeddings(
 
     vectors: dict[str, list[float]]
     if fallback_used:
-        vectors = _cooccurrence_vectors(sanitized_sessions, top_artists)
+        vectors = _cooccurrence_vectors(sanitized_sessions)
     else:
         try:
             vectors = _train_word2vec_embeddings(sanitized_sessions)
         except Exception:
             fallback_used = True
             fallback_reasons.append("word2vec_training_failed")
-            vectors = _cooccurrence_vectors(sanitized_sessions, top_artists)
+            vectors = _cooccurrence_vectors(sanitized_sessions)
 
     if len(unique_artists) < 50:
         fallback_reasons.append("sparse_artist_history")
-        genre_vectors = _cooccurrence_vectors([], top_artists)
-        if genre_vectors:
-            vectors = _blend_vectors(vectors, genre_vectors, 0.35)
-        elif not vectors:
-            vectors = {
-                artist_id: _normalize(
-                    [
-                        1.0 if index == (_hash_bucket(artist_id, VECTOR_SIZE)) else 0.0
-                        for index in range(VECTOR_SIZE)
-                    ]
-                )
-                for artist_id in unique_artists
-            }
+
+    # Blend genre/sub-genre signal into every artist's vector. Artists with no
+    # session vector (e.g. top artists absent from recent plays) end up with a
+    # pure genre vector, which is enough for clustering to place them.
+    genre_vectors = _genre_vectors(genres_by_artist or {})
+    if genre_vectors:
+        vectors = _blend_vectors(vectors, genre_vectors, GENRE_BLEND_RATIO)
 
     for artist_id in unique_artists:
         if artist_id not in vectors:
@@ -185,4 +227,3 @@ def train_artist_embeddings(
         fallback_used=fallback_used or len(unique_artists) < 50,
         fallback_reasons=fallback_reasons,
     )
-

@@ -354,6 +354,7 @@ export default function HomePage() {
           <span>
             Taste<em>Graph</em>
           </span>
+          <span className="tg-brand-version">v0.1</span>
         </div>
         <div className="tg-landing-top-meta">
           <span className="tg-landing-dot" />

@@ -14,10 +14,6 @@ interface NeighborSummary {
   weight: number;
 }
 
-// Average track length (~3.5 min) used to estimate listening hours from plays
-// when the backend doesn't provide them.
-const MINUTES_PER_PLAY = 3.5;
-
 const MOOD_POOLS = [
   ["🌃 late nights", "🚶 walks", "🎧 headphones on"],
   ["☕ mornings", "🚗 long drives", "📝 writing"],
@@ -163,9 +159,10 @@ export default function NodeCard({
     0,
   );
   const playShare = allPlays === 0 ? 0 : node.playCount / allPlays;
-  const listenedHours =
-    node.listeningHours ??
-    Math.max(1, Math.round((node.playCount * MINUTES_PER_PLAY) / 60));
+  const rankSignal = Math.max(
+    1,
+    Math.round((node.playCount / (maxPlays || 1)) * 100),
+  );
   const neighbors = getNeighbors(node, nodes, edges);
   const topNeighbors = neighbors.slice(0, 6);
 
@@ -204,7 +201,7 @@ export default function NodeCard({
             {node.clusterLabel}
           </span>
           <span className="tg-chip is-mono">
-            {(playShare * 100).toFixed(1)}% of plays
+            {(playShare * 100).toFixed(1)}% of graph score
           </span>
         </div>
 
@@ -218,14 +215,14 @@ export default function NodeCard({
 
         <div className="tg-detail-bars">
           <div className="tg-bar-stat">
-            <span>Plays</span>
+            <span>Score</span>
             <strong>{node.playCount.toLocaleString()}</strong>
           </div>
           <div className="tg-bar-stat">
-            <span>Listened</span>
+            <span>Signal</span>
             <strong>
-              {listenedHours.toLocaleString()}
-              <em>hrs</em>
+              {rankSignal.toLocaleString()}
+              <em>%</em>
             </strong>
           </div>
           <div className="tg-bar-stat">
@@ -275,10 +272,10 @@ export default function NodeCard({
         >
           <h3>
             <span className="tg-h3-label">
-              Most played
+              Top tracks
               <span className="tg-squiggle" />
             </span>
-            <span>all tracks</span>
+            <span>ranked by Spotify</span>
           </h3>
           <div className="tg-track-list">
             {node.topTracks.map((track, index) => (

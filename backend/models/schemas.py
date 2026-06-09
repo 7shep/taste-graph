@@ -48,6 +48,7 @@ class GraphEdge(BaseModel):
     source: str
     target: str
     weight: float
+    kind: Literal["listening", "genre"] = "listening"
 
 
 class GraphCluster(BaseModel):
@@ -90,4 +91,3 @@ class SessionRecord(BaseModel):
     user_id: str
     session_date: str
     artist_sequence: list[str] = Field(default_factory=list)
-

@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from backend.services.clustering import (
+    SOFT_ASSIGN_THRESHOLD,
     UNCATEGORIZED_COLOR,
     build_clustering_result,
     cluster_artist_embeddings,
@@ -46,6 +47,17 @@ class ClusteringTests(unittest.TestCase):
         assigned = soft_assign_noise(labels, membership_vectors, threshold=0.15)
 
         self.assertEqual(assigned, [0, 1, 0, -1])
+
+    def test_soft_assign_threshold_absorbs_mild_leaners(self) -> None:
+        self.assertEqual(SOFT_ASSIGN_THRESHOLD, 0.08)
+
+        labels = soft_assign_noise(
+            [-1, -1],
+            [[0.10, 0.02], [0.05, 0.03]],
+            threshold=SOFT_ASSIGN_THRESHOLD,
+        )
+
+        self.assertEqual(labels, [0, -1])
 
     def test_soft_assign_noise_handles_empty_membership(self) -> None:
         self.assertEqual(soft_assign_noise([-1, -1], [[], []]), [-1, -1])

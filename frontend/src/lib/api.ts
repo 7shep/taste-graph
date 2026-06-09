@@ -71,7 +71,10 @@ function getFallbackAuthSession(): SpotifyAuthSession | null {
   };
 }
 
-function buildGraphRequest(timeRange: TimeRange): GraphGenerateRequest {
+function buildGraphRequest(
+  timeRange: TimeRange,
+  forceRefresh: boolean,
+): GraphGenerateRequest {
   const authSession = readSpotifyAuthSession() || getFallbackAuthSession();
   if (!authSession) {
     throw new Error("Spotify login is required before loading the dashboard.");
@@ -82,6 +85,7 @@ function buildGraphRequest(timeRange: TimeRange): GraphGenerateRequest {
     access_token: authSession.accessToken,
     refresh_token: authSession.refreshToken,
     time_range: timeRange,
+    force_refresh: forceRefresh,
   };
 }
 
@@ -116,6 +120,7 @@ function normalizeGraphPayload(payload: GraphApiPayload): GraphPayload {
 export async function fetchGraphPayload(
   timeRange: TimeRange,
   signal?: AbortSignal,
+  forceRefresh: boolean = false,
 ): Promise<GraphPayload> {
   const response = await fetch(buildGraphUrl(timeRange), {
     method: "POST",
@@ -123,7 +128,7 @@ export async function fetchGraphPayload(
       Accept: "application/json",
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(buildGraphRequest(timeRange)),
+    body: JSON.stringify(buildGraphRequest(timeRange, forceRefresh)),
     signal,
   });
 

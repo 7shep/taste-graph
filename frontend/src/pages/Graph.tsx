@@ -181,6 +181,7 @@ export default function GraphPage() {
           <span className="tg-brand-name">
             Taste<em>Graph</em>
           </span>
+          <span className="tg-brand-version">v0.1</span>
         </div>
 
         <label className="tg-search">

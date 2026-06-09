@@ -58,6 +58,7 @@ interface GraphSimulationLink extends SimulationLinkDatum<GraphSimulationNode> {
   target: GraphSimulationNode;
   weight: number;
   crossCluster: boolean;
+  genre: boolean;
 }
 
 interface GraphTransform {
@@ -76,7 +77,7 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
-// Radius is scaled relative to the listener's own top artist so real Spotify
+// Radius is scaled relative to the listener's own top artist score.
 // data (small play counts) still produces the 6px–24px spread from the spec.
 function radiusForPlayCount(playCount: number, maxPlayCount: number) {
   if (maxPlayCount <= 0) {
@@ -292,11 +293,12 @@ const Graph = forwardRef<GraphHandle, GraphProps>(function Graph(
         focusedNodeId &&
         (link.source.id === focusedNodeId || link.target.id === focusedNodeId);
       const isDimmed = focusedNodeId && !isFocused;
-      const alpha = isDimmed
+      const baseAlpha = isDimmed
         ? 0.04
         : isFocused
           ? 0.55 + link.weight * 0.35
           : 0.1 + link.weight * 0.22;
+      const alpha = link.genre ? baseAlpha * 0.6 : baseAlpha;
       const width = isDimmed
         ? 0.5
         : isFocused
@@ -314,7 +316,13 @@ const Graph = forwardRef<GraphHandle, GraphProps>(function Graph(
 
       context.strokeStyle = gradient;
       context.lineWidth = width;
-      context.setLineDash(link.crossCluster && !isDimmed ? [3, 3] : []);
+      context.setLineDash(
+        link.genre
+          ? [2, 4]
+          : link.crossCluster && !isDimmed
+            ? [3, 3]
+            : [],
+      );
       context.beginPath();
       context.moveTo(link.source.x || 0, link.source.y || 0);
       context.lineTo(link.target.x || 0, link.target.y || 0);
@@ -543,6 +551,7 @@ const Graph = forwardRef<GraphHandle, GraphProps>(function Graph(
         target,
         weight: edge.weight,
         crossCluster: source.clusterId !== target.clusterId,
+        genre: edge.kind === "genre",
       });
     }
 
@@ -554,10 +563,18 @@ const Graph = forwardRef<GraphHandle, GraphProps>(function Graph(
         "link",
         forceLink<GraphSimulationNode, GraphSimulationLink>(linkItems)
           .distance((link: GraphSimulationLink) =>
-            link.crossCluster ? 210 : 90 + (1 - link.weight) * 70,
+            link.genre
+              ? 240
+              : link.crossCluster
+                ? 210
+                : 90 + (1 - link.weight) * 70,
           )
           .strength((link: GraphSimulationLink) =>
-            link.crossCluster ? 0.06 : 0.12 + link.weight * 0.14,
+            link.genre
+              ? 0.03
+              : link.crossCluster
+                ? 0.06
+                : 0.12 + link.weight * 0.14,
           ),
       )
       .force("charge", forceManyBody().strength(-170))
@@ -755,7 +772,7 @@ const Graph = forwardRef<GraphHandle, GraphProps>(function Graph(
         >
           <strong>{tooltip.node.name}</strong>
           <span>
-            {tooltip.node.playCount.toLocaleString()} plays ·{" "}
+            {tooltip.node.playCount.toLocaleString()} score ·{" "}
             {tooltip.node.clusterLabel}
           </span>
         </div>

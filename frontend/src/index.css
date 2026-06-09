@@ -598,6 +598,17 @@ button {
   opacity: 0.85;
 }
 
+.tg-brand-version {
+  align-self: flex-start;
+  margin-top: 1px;
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  color: var(--paper-mute);
+  text-transform: uppercase;
+}
+
 .tg-brand-mark {
   display: grid;
   place-items: center;
@@ -1339,7 +1350,7 @@ button {
 }
 
 .tg-track-count::after {
-  content: "plays";
+  content: "score";
   font-family: var(--sans);
   font-size: 9.5px;
   color: var(--paper-mute);

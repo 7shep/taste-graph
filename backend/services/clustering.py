@@ -26,9 +26,9 @@ ACCESSIBLE_CLUSTER_PALETTE = [
 ]
 UNCATEGORIZED_COLOR = "#9CA3AF"
 # Minimum soft-cluster membership probability required to pull an HDBSCAN
-# noise point into its most likely cluster. Points below this stay
-# uncategorized so genuinely odd one-off artists are not forced into a group.
-SOFT_ASSIGN_THRESHOLD = 0.15
+# noise point into its most likely cluster. The lower bar is intentional now
+# that vectors carry genre signal, so a mild lean is meaningful.
+SOFT_ASSIGN_THRESHOLD = 0.08
 
 
 @dataclass
@@ -251,4 +251,3 @@ def cluster_artist_embeddings(vectors: dict[str, list[float]]) -> ClusteringResu
         labels,
         fallback_used=fallback_used,
     )
-
