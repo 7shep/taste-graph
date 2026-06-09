@@ -203,3 +203,21 @@ class SpotifyService:
         )
         payload = self._request_json("GET", url, token=access_token)
         return payload.get("items", []) or []
+
+    def get_artists(
+        self, access_token: str, artist_ids: list[str]
+    ) -> list[dict[str, Any]]:
+        unique_ids = list(
+            dict.fromkeys(artist_id for artist_id in artist_ids if artist_id)
+        )
+        artists: list[dict[str, Any]] = []
+        for start in range(0, len(unique_ids), 50):
+            chunk = unique_ids[start : start + 50]
+            url = f"{SPOTIFY_API_BASE}/artists?" + parse.urlencode(
+                {"ids": ",".join(chunk)}
+            )
+            payload = self._request_json("GET", url, token=access_token)
+            artists.extend(
+                artist for artist in payload.get("artists", []) or [] if artist
+            )
+        return artists

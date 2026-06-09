@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from backend.services.spotify import segment_sessions
+from backend.services.spotify import SpotifyService, segment_sessions
 
 
 class SpotifyServiceTests(unittest.TestCase):
@@ -46,6 +46,29 @@ class SpotifyServiceTests(unittest.TestCase):
         sessions = segment_sessions(recently_played)
 
         self.assertEqual(sessions, [["imagine-dragons", "jid", "artist-b"]])
+
+
+class GetArtistsTests(unittest.TestCase):
+    def test_get_artists_chunks_ids_in_batches_of_fifty(self) -> None:
+        service = SpotifyService()
+        requested_urls: list[str] = []
+
+        def fake_request_json(method, url, **kwargs):
+            requested_urls.append(url)
+            from urllib import parse
+
+            query = parse.parse_qs(parse.urlsplit(url).query)
+            ids = query["ids"][0].split(",")
+            return {"artists": [{"id": artist_id, "genres": []} for artist_id in ids]}
+
+        service._request_json = fake_request_json  # type: ignore[method-assign]
+
+        ids = [f"artist-{index}" for index in range(60)] + ["artist-0", ""]
+        artists = service.get_artists("token", ids)
+
+        self.assertEqual(len(requested_urls), 2)
+        self.assertEqual(len(artists), 60)
+        self.assertEqual(artists[0]["id"], "artist-0")
 
 
 if __name__ == "__main__":
