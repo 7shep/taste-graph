@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
-from backend._compat import FastAPI
+from backend._compat import CORSMiddleware, FastAPI
 from backend.db.supabase import SupabaseRepository
 from backend.routers.auth import configure_auth_service, router as auth_router
 from backend.routers.graph import configure_graph_pipeline, router as graph_router
@@ -19,6 +20,11 @@ REQUIRED_ENV_VARS = [
     "GEMINI_API_KEY",
     "SUPABASE_URL",
     "SUPABASE_SERVICE_KEY",
+]
+
+DEFAULT_CORS_ORIGINS = [
+    "http://127.0.0.1:4173",
+    "http://localhost:4173",
 ]
 
 
@@ -46,6 +52,23 @@ def validate_required_env_vars() -> None:
         )
 
 
+def _origin_from_url(value: str) -> str | None:
+    parsed = urlparse(value.strip())
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def get_cors_origins() -> list[str]:
+    origins = list(DEFAULT_CORS_ORIGINS)
+    frontend_app_url = os.getenv("FRONTEND_APP_URL")
+    if frontend_app_url:
+        origin = _origin_from_url(frontend_app_url)
+        if origin:
+            origins.append(origin)
+    return sorted(set(origins))
+
+
 def create_app(*, validate_env: bool = False) -> FastAPI:
     load_env_files()
 
@@ -68,6 +91,12 @@ def create_app(*, validate_env: bool = False) -> FastAPI:
     )
 
     app = FastAPI(title="Taste Graph API")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=get_cors_origins(),
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["*"],
+    )
     app.include_router(auth_router)
     app.include_router(graph_router)
     app.include_router(share_router)

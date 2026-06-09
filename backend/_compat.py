@@ -13,8 +13,12 @@ from typing import Any, Callable, Union, get_args, get_origin, get_type_hints
 
 try:
     from fastapi import APIRouter, FastAPI, HTTPException
+    from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse, RedirectResponse
 except ModuleNotFoundError:  # pragma: no cover - exercised indirectly in tests
+    class CORSMiddleware:
+        pass
+
     class HTTPException(Exception):
         def __init__(self, status_code: int, detail: Any):
             super().__init__(detail)
@@ -60,9 +64,15 @@ except ModuleNotFoundError:  # pragma: no cover - exercised indirectly in tests
         def __init__(self, title: str = "App"):
             self.title = title
             self.routers: list[APIRouter] = []
+            self.middleware: list[dict[str, Any]] = []
 
         def include_router(self, router: APIRouter) -> None:
             self.routers.append(router)
+
+        def add_middleware(self, middleware_class: type, **options: Any) -> None:
+            self.middleware.append(
+                {"middleware_class": middleware_class, "options": options}
+            )
 
     class JSONResponse(dict):
         def __init__(self, *, content: Any, status_code: int = 200):
