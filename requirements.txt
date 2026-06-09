@@ -1,0 +1,11 @@
+fastapi
+gensim
+hdbscan
+httpx
+numpy
+pydantic
+python-dotenv
+scipy
+supabase
+umap-learn
+uvicorn
