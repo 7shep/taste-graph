@@ -116,7 +116,10 @@ function normalizePayload(payload: GraphPayload): NormalizedGraphPayload {
   };
 }
 
-export function useGraphData(timeRange: TimeRange): UseGraphDataResult {
+export function useGraphData(
+  timeRange: TimeRange,
+  enabled: boolean = true,
+): UseGraphDataResult {
   const [data, setData] = useState<NormalizedGraphPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<GraphStatus>("idle");
@@ -128,6 +131,11 @@ export function useGraphData(timeRange: TimeRange): UseGraphDataResult {
   }, []);
 
   useEffect(() => {
+    if (!enabled) {
+      setStatus("idle");
+      return;
+    }
+
     const controller = new AbortController();
     const loadGraph = async () => {
       setStatus("loading");
@@ -153,7 +161,9 @@ export function useGraphData(timeRange: TimeRange): UseGraphDataResult {
         const message =
           caughtError instanceof GraphApiError
             ? `${caughtError.message}: ${caughtError.detail}`
-            : "Unable to load graph data.";
+            : caughtError instanceof Error && caughtError.message
+              ? caughtError.message
+              : "Unable to load graph data.";
         setError(message);
         setStatus("error");
       }
@@ -162,7 +172,7 @@ export function useGraphData(timeRange: TimeRange): UseGraphDataResult {
     void loadGraph();
 
     return () => controller.abort();
-  }, [refreshToken, timeRange]);
+  }, [enabled, refreshToken, timeRange]);
 
   return useMemo(
     () => ({

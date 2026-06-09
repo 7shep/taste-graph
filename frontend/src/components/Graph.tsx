@@ -49,6 +49,7 @@ interface GraphProps {
 
 interface GraphSimulationNode extends SimulationNodeDatum, NormalizedGraphNode {
   radius: number;
+  hero: boolean;
 }
 
 interface GraphSimulationLink extends SimulationLinkDatum<GraphSimulationNode> {
@@ -75,8 +76,13 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
-function radiusForPlayCount(playCount: number) {
-  return clamp(6 + Math.sqrt(playCount) / 5.1, 6, 24);
+// Radius is scaled relative to the listener's own top artist so real Spotify
+// data (small play counts) still produces the 6px–24px spread from the spec.
+function radiusForPlayCount(playCount: number, maxPlayCount: number) {
+  if (maxPlayCount <= 0) {
+    return 6;
+  }
+  return clamp(6 + 18 * Math.sqrt(playCount / maxPlayCount), 6, 24);
 }
 
 function rgbaFromHex(hex: string, alpha: number) {
@@ -211,6 +217,7 @@ const Graph = forwardRef<GraphHandle, GraphProps>(function Graph(
   const linksRef = useRef<GraphSimulationLink[]>([]);
   const transformRef = useRef<GraphTransform>({ x: 0, y: 0, k: 1 });
   const tooltipFrameRef = useRef<number | null>(null);
+  const drawSceneRef = useRef<() => void>(() => {});
   const pointerStateRef = useRef<{ nodeId: string | null; moved: boolean }>({
     nodeId: null,
     moved: false,
@@ -268,10 +275,6 @@ const Graph = forwardRef<GraphHandle, GraphProps>(function Graph(
     const transform = transformRef.current;
     const focusedNodeId = selectedNodeId || hoveredNodeId;
     const neighborIds = getNeighbors(focusedNodeId, linksRef.current);
-    const labelCutoff =
-      nodesRef.current.length > 0
-        ? nodesRef.current[Math.min(5, nodesRef.current.length - 1)].playCount
-        : 0;
 
     context.save();
     context.translate(transform.x, transform.y);
@@ -289,8 +292,16 @@ const Graph = forwardRef<GraphHandle, GraphProps>(function Graph(
         focusedNodeId &&
         (link.source.id === focusedNodeId || link.target.id === focusedNodeId);
       const isDimmed = focusedNodeId && !isFocused;
-      const alpha = isDimmed ? 0.06 : 0.12 + link.weight * 0.28;
-      const width = isDimmed ? 0.7 : 0.7 + link.weight * 1.4;
+      const alpha = isDimmed
+        ? 0.04
+        : isFocused
+          ? 0.55 + link.weight * 0.35
+          : 0.1 + link.weight * 0.22;
+      const width = isDimmed
+        ? 0.5
+        : isFocused
+          ? 1.2 + link.weight * 1.8
+          : 0.5 + link.weight * 1.1;
       const gradient = context.createLinearGradient(
         link.source.x || 0,
         link.source.y || 0,
@@ -303,7 +314,7 @@ const Graph = forwardRef<GraphHandle, GraphProps>(function Graph(
 
       context.strokeStyle = gradient;
       context.lineWidth = width;
-      context.setLineDash(link.crossCluster ? [4, 4] : []);
+      context.setLineDash(link.crossCluster && !isDimmed ? [3, 3] : []);
       context.beginPath();
       context.moveTo(link.source.x || 0, link.source.y || 0);
       context.lineTo(link.target.x || 0, link.target.y || 0);
@@ -319,11 +330,11 @@ const Graph = forwardRef<GraphHandle, GraphProps>(function Graph(
       const isFocused = focusedNodeId === node.id;
       const isNeighbor = focusedNodeId ? neighborIds.has(node.id) : false;
       const shouldDim = focusedNodeId ? !isFocused && !isNeighbor : false;
-      const alpha = shouldDim ? 0.24 : 1;
+      const alpha = shouldDim ? 0.22 : 1;
 
       const x = node.x || 0;
       const y = node.y || 0;
-      const glowRadius = node.radius + (isFocused ? 16 : 9);
+      const glowRadius = node.radius + (isFocused ? 18 : 9);
       const glow = context.createRadialGradient(
         x,
         y,
@@ -353,8 +364,8 @@ const Graph = forwardRef<GraphHandle, GraphProps>(function Graph(
         y,
         node.radius,
       );
-      highlight.addColorStop(0, `rgba(255, 255, 255, ${0.28 * alpha})`);
-      highlight.addColorStop(0.7, "rgba(255, 255, 255, 0)");
+      highlight.addColorStop(0, `rgba(255, 255, 255, ${0.35 * alpha})`);
+      highlight.addColorStop(0.6, "rgba(255, 255, 255, 0)");
       context.fillStyle = highlight;
       context.beginPath();
       context.arc(x, y, node.radius, 0, Math.PI * 2);
@@ -362,30 +373,34 @@ const Graph = forwardRef<GraphHandle, GraphProps>(function Graph(
 
       if (isFocused) {
         context.strokeStyle = rgbaFromHex(node.color, 0.85);
-        context.lineWidth = 1.4;
+        context.lineWidth = 1.5;
         context.beginPath();
-        context.arc(x, y, node.radius + 5, 0, Math.PI * 2);
+        context.arc(x, y, node.radius + 6, 0, Math.PI * 2);
+        context.stroke();
+        // outer faint ring
+        context.strokeStyle = rgbaFromHex(node.color, 0.25);
+        context.lineWidth = 1;
+        context.beginPath();
+        context.arc(x, y, node.radius + 12, 0, Math.PI * 2);
         context.stroke();
       }
 
       const shouldShowLabel =
-        labelMode === "all"
-          ? !shouldDim
-          : isFocused || node.playCount >= labelCutoff;
+        labelMode === "all" ? !shouldDim : node.hero || isFocused;
 
       if (shouldShowLabel) {
-        const fontSize = node.playCount >= 1200 ? 13 : 11;
-        context.font = `${node.playCount >= 1200 ? "600" : "500"} ${fontSize}px "DM Sans", sans-serif`;
+        const fontSize = node.hero ? 13 : 11;
+        context.font = `${node.hero ? "600" : "500"} ${fontSize}px "DM Sans", system-ui, sans-serif`;
         context.textAlign = "center";
         context.textBaseline = "top";
         const labelY = y + node.radius + 7;
         const labelWidth = context.measureText(node.name).width;
-        context.fillStyle = `rgba(10, 10, 13, ${0.55 * alpha})`;
+        context.fillStyle = `rgba(10, 10, 13, ${0.5 * alpha})`;
         context.fillRect(
           x - labelWidth / 2 - 5,
           labelY - 1,
           labelWidth + 10,
-          fontSize + 6,
+          fontSize + 4,
         );
         context.fillStyle = `rgba(244, 237, 227, ${0.95 * alpha})`;
         context.fillText(node.name, x, labelY);
@@ -486,6 +501,13 @@ const Graph = forwardRef<GraphHandle, GraphProps>(function Graph(
       canvasSize.width,
       canvasSize.height,
     );
+    const maxPlayCount = nodes.reduce(
+      (max, node) => Math.max(max, node.playCount),
+      0,
+    );
+    // Hero artists (relative to the listener's own top artist) render larger
+    // with bolder labels, like the four anchors in the design.
+    const heroCutoff = maxPlayCount * 0.55;
     const nodeItems: GraphSimulationNode[] = nodes.map((node) => {
       const anchor = anchors.get(node.clusterId) || {
         x: canvasSize.width / 2,
@@ -494,10 +516,13 @@ const Graph = forwardRef<GraphHandle, GraphProps>(function Graph(
       const seed = hashString(node.id);
       const angle = ((seed % 360) / 180) * Math.PI;
       const distance = 18 + (seed % 70);
+      const hero = maxPlayCount > 0 && node.playCount >= heroCutoff;
 
       return {
         ...node,
-        radius: radiusForPlayCount(node.playCount),
+        hero,
+        radius:
+          radiusForPlayCount(node.playCount, maxPlayCount) * (hero ? 1.15 : 1),
         x: node.x ?? anchor.x + Math.cos(angle) * distance,
         y: node.y ?? anchor.y + Math.sin(angle) * distance,
       };
@@ -546,17 +571,20 @@ const Graph = forwardRef<GraphHandle, GraphProps>(function Graph(
       .force("cluster", createClusterForce(anchors, 0.22))
       .alpha(1)
       .alphaDecay(0.045)
-      .on("tick", drawScene);
+      .on("tick", () => drawSceneRef.current());
 
     simulationRef.current = simulation;
-    drawScene();
+    drawSceneRef.current();
 
     return () => {
       simulation.stop();
     };
-  }, [canvasSize.height, canvasSize.width, clusters, drawScene, edges, nodes]);
+  }, [canvasSize.height, canvasSize.width, clusters, edges, nodes]);
 
+  // Keep the latest drawScene in a ref so the simulation effect can redraw on
+  // tick without depending on drawScene's identity (which changes on hover).
   useEffect(() => {
+    drawSceneRef.current = drawScene;
     drawScene();
   }, [drawScene]);
 
@@ -727,7 +755,7 @@ const Graph = forwardRef<GraphHandle, GraphProps>(function Graph(
         >
           <strong>{tooltip.node.name}</strong>
           <span>
-            {tooltip.node.playCount.toLocaleString()} plays -{" "}
+            {tooltip.node.playCount.toLocaleString()} plays ·{" "}
             {tooltip.node.clusterLabel}
           </span>
         </div>

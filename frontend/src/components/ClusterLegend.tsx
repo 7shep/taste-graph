@@ -15,7 +15,7 @@ export default function ClusterLegend({
 
   return (
     <section className="tg-legend-card" aria-label="Cluster legend">
-      <h3>Clusters</h3>
+      <h3>Your neighborhoods</h3>
       <div className="tg-legend-list">
         {clusters.map((cluster) => {
           const isHidden = hiddenSet.has(cluster.id);

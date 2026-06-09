@@ -5,6 +5,13 @@ import NodeCard from "../components/NodeCard";
 import ShareBanner from "../components/ShareBanner";
 import TimeRangeToggle from "../components/TimeRangeToggle";
 import { useGraphData } from "../hooks/useGraphData";
+import {
+  clearSpotifyAuthSession,
+  getSpotifyAuthErrorMessage,
+  persistSpotifyAuthSessionFromHash,
+  readSpotifyAuthError,
+  readSpotifyAuthSession,
+} from "../lib/auth";
 import type { LabelMode, TimeRange } from "../types/graph";
 
 function BrandMark() {
@@ -42,7 +49,49 @@ export default function GraphPage() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [searchValue, setSearchValue] = useState("");
   const [zoomPercent, setZoomPercent] = useState(100);
-  const { data, error, refresh, source, status } = useGraphData(timeRange);
+  const [authReady, setAuthReady] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(() =>
+    Boolean(
+      readSpotifyAuthSession() ||
+      (import.meta.env.VITE_SPOTIFY_ACCESS_TOKEN?.trim() &&
+        import.meta.env.VITE_SPOTIFY_USER_ID?.trim()),
+    ),
+  );
+  const { data, error, refresh, status } = useGraphData(
+    timeRange,
+    authReady && isAuthenticated && !authError,
+  );
+
+  useEffect(() => {
+    const hashError = readSpotifyAuthError(window.location.hash);
+    const hashErrorMessage = getSpotifyAuthErrorMessage(hashError);
+    const sessionFromHash = persistSpotifyAuthSessionFromHash(
+      window.location.hash,
+    );
+    const storedSession = readSpotifyAuthSession();
+
+    if (window.location.hash) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
+    if (hashErrorMessage) {
+      setAuthError(hashErrorMessage);
+      setIsAuthenticated(false);
+      setAuthReady(true);
+      return;
+    }
+
+    setIsAuthenticated(
+      Boolean(
+        sessionFromHash ||
+        storedSession ||
+        (import.meta.env.VITE_SPOTIFY_ACCESS_TOKEN?.trim() &&
+          import.meta.env.VITE_SPOTIFY_USER_ID?.trim()),
+      ),
+    );
+    setAuthReady(true);
+  }, []);
 
   useEffect(() => {
     if (!data || data.nodes.length === 0) {
@@ -104,6 +153,18 @@ export default function GraphPage() {
     }
   };
 
+  // Only offer logout for a real stored session; the env-token dev fallback
+  // cannot be cleared from the UI.
+  const hasStoredSession = useMemo(
+    () => authReady && isAuthenticated && readSpotifyAuthSession() !== null,
+    [authReady, isAuthenticated],
+  );
+
+  const handleLogout = () => {
+    clearSpotifyAuthSession();
+    window.location.assign("/");
+  };
+
   const toggleCluster = (clusterId: string) => {
     setHiddenClusterIds((current) =>
       current.includes(clusterId)
@@ -135,7 +196,7 @@ export default function GraphPage() {
             <path d="m9.5 9.5 3 3" />
           </svg>
           <input
-            placeholder="Find an artist, album, or cluster..."
+            placeholder="Search the graph…"
             value={searchValue}
             onChange={(event) => setSearchValue(event.target.value)}
             onKeyDown={(event) => {
@@ -149,7 +210,7 @@ export default function GraphPage() {
         <button
           type="button"
           className="tg-icon-button"
-          title="Refresh graph"
+          title="Refresh from Spotify"
           onClick={refresh}
         >
           <svg
@@ -165,6 +226,28 @@ export default function GraphPage() {
           </svg>
         </button>
         <ShareBanner onShare={() => void handleShare()} />
+        {hasStoredSession ? (
+          <button
+            type="button"
+            className="tg-icon-button"
+            title="Log out"
+            aria-label="Log out"
+            onClick={handleLogout}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            >
+              <path d="M5.5 12H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h2.5" />
+              <path d="m9.5 4.5 2.5 2.5-2.5 2.5" />
+              <path d="M12 7H5.5" />
+            </svg>
+          </button>
+        ) : null}
       </header>
 
       <main className="tg-layout">
@@ -175,22 +258,26 @@ export default function GraphPage() {
               <strong>{data?.stats.artists ?? "-"}</strong>
             </div>
             <div>
-              <span>Edges</span>
+              <span>Connections</span>
               <strong>{data?.stats.edges ?? "-"}</strong>
             </div>
             <div>
-              <span>Clusters</span>
+              <span>Neighborhoods</span>
               <strong>{data?.stats.clusters ?? "-"}</strong>
-              <small>
-                {source === "fixture" ? "fixture preview" : "live graph"}
-              </small>
             </div>
           </div>
 
+          {authReady && !isAuthenticated ? (
+            <EmptyStage
+              message={
+                authError || "Log in with Spotify to open your dashboard."
+              }
+            />
+          ) : null}
           {status === "error" ? (
             <EmptyStage message={error || "Unable to load graph data."} />
           ) : null}
-          {status === "loading" ? (
+          {authReady && status === "loading" ? (
             <EmptyStage message="Loading your taste graph..." />
           ) : null}
           {status === "success" && data && data.nodes.length === 0 ? (

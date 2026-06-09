@@ -13,7 +13,9 @@ export function useSpotifyAuth() {
     setError(null);
 
     try {
-      const { url } = await getSpotifyLoginUrl();
+      const { url } = await getSpotifyLoginUrl(
+        `${window.location.origin}/graph`,
+      );
       window.location.assign(url);
     } catch (caughtError) {
       setError(
