@@ -1,0 +1,24 @@
+change:
+  name: add-spotify-login-landing-page
+  title: Add a Spotify login landing page
+  created: 2026-06-08
+apply:
+  requires:
+    - proposal
+    - design
+    - tasks
+artifacts:
+  - id: proposal
+    path: proposal.md
+    status: done
+  - id: design
+    path: design.md
+    status: done
+    dependsOn:
+      - proposal
+  - id: tasks
+    path: tasks.md
+    status: done
+    dependsOn:
+      - proposal
+      - design

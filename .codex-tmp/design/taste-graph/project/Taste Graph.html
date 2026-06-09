@@ -1,0 +1,660 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Taste Graph — your listening, mapped</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink-0:#0a0a0d;
+    --ink-1:#101015;
+    --ink-2:#16161d;
+    --ink-3:#1d1d26;
+    --ink-4:#2a2a36;
+    --line:#26262f;
+    --line-2:#1a1a22;
+    --paper:#f4ede3;
+    --paper-dim:#c9c2b6;
+    --paper-mute:#7d7868;
+    --paper-faint:#4a4640;
+
+    /* cluster palette */
+    --c-east:#ef8a6b;       /* warm coral — A$AP / NY */
+    --c-atl:#e9bd5a;        /* amber — Dreamville */
+    --c-tde:#7fd4a8;        /* mint — TDE / West */
+    --c-ovo:#9aa9ee;        /* periwinkle — OVO */
+    --c-bridge:#c79df0;     /* purple — bridges/discoveries */
+
+    --sans:"DM Sans", ui-sans-serif, system-ui, sans-serif;
+    --serif:"Instrument Serif", ui-serif, Georgia, serif;
+    --mono:"JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+  }
+
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html, body{height:100%;}
+  body{
+    background:var(--ink-0);
+    color:var(--paper);
+    font-family:var(--sans);
+    font-size:13px;
+    line-height:1.45;
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+    letter-spacing:-0.005em;
+  }
+
+  /* grain + vignette over everything */
+  body::before{
+    content:"";
+    position:fixed; inset:0; pointer-events:none; z-index:50;
+    background:
+      radial-gradient(120% 80% at 50% 0%, transparent 40%, rgba(0,0,0,0.55) 100%),
+      radial-gradient(80% 60% at 10% 100%, rgba(239,138,107,0.06), transparent 60%),
+      radial-gradient(60% 50% at 100% 100%, rgba(154,169,238,0.05), transparent 60%);
+    mix-blend-mode:normal;
+  }
+  body::after{
+    content:"";
+    position:fixed; inset:0; pointer-events:none; z-index:51;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.95 0 0 0 0 0.92 0 0 0 0 0.86 0 0 0 0.7 0'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.06'/></svg>");
+    opacity:0.5;
+    mix-blend-mode:overlay;
+  }
+
+  /* ─────────────────────────── App shell ─────────────────────────── */
+  .app{
+    position:fixed; inset:0;
+    display:grid;
+    grid-template-rows:56px 1fr;
+    grid-template-columns:1fr 380px;
+    grid-template-areas:
+      "top top"
+      "graph rail";
+  }
+
+  /* ─── Top bar ─── */
+  .topbar{
+    grid-area:top;
+    display:flex; align-items:center; gap:18px;
+    padding:0 18px 0 22px;
+    border-bottom:1px solid var(--line-2);
+    background:linear-gradient(to bottom, var(--ink-1), var(--ink-0));
+    z-index:10;
+    min-width:0;
+  }
+  .brand{
+    display:flex; align-items:baseline; gap:10px;
+  }
+  .brand-mark{
+    width:22px; height:22px; position:relative; align-self:center;
+  }
+  .brand-mark svg{display:block;}
+  .brand-name{
+    font-family:var(--serif);
+    font-size:22px;
+    letter-spacing:-0.01em;
+    line-height:1;
+  }
+  .brand-name em{ font-style:italic; color:var(--c-east); font-weight:400;}
+  .brand-tag{
+    font-family:var(--mono);
+    font-size:10px;
+    color:var(--paper-mute);
+    text-transform:uppercase;
+    letter-spacing:0.12em;
+    padding-left:12px;
+    margin-left:4px;
+    border-left:1px solid var(--line);
+    white-space:nowrap;
+  }
+  @media (max-width: 1100px){
+    .brand-tag, .ov-stat .delta{ display:none; }
+  }
+
+  .topnav{
+    display:flex; gap:2px; margin-left:14px;
+  }
+  .topnav a{
+    font-size:12.5px;
+    color:var(--paper-dim);
+    text-decoration:none;
+    padding:6px 12px;
+    border-radius:6px;
+    letter-spacing:-0.005em;
+  }
+  .topnav a.active{
+    color:var(--paper);
+    background:var(--ink-3);
+  }
+  .topnav a:hover:not(.active){
+    color:var(--paper);
+    background:var(--ink-2);
+  }
+
+  .search{
+    margin-left:auto;
+    display:flex; align-items:center; gap:8px;
+    background:var(--ink-2);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:6px 10px;
+    width:min(260px, 22vw);
+    color:var(--paper-dim);
+    font-size:12.5px;
+  }
+  .search input{
+    flex:1; background:none; border:0; outline:0;
+    color:var(--paper); font-family:var(--sans); font-size:12.5px;
+  }
+  .search input::placeholder{ color:var(--paper-mute);}
+  .search kbd{
+    font-family:var(--mono); font-size:10px;
+    background:var(--ink-3); border:1px solid var(--line);
+    padding:2px 5px; border-radius:4px;
+    color:var(--paper-mute);
+  }
+
+  .iconbtn{
+    width:32px; height:32px;
+    display:grid; place-items:center;
+    border-radius:8px; border:1px solid var(--line);
+    background:var(--ink-2); color:var(--paper-dim);
+    cursor:pointer;
+  }
+  .iconbtn:hover{ color:var(--paper); border-color:var(--ink-4);}
+
+  .share{
+    display:flex; align-items:center; gap:6px;
+    background:var(--paper); color:var(--ink-0);
+    padding:7px 12px 7px 10px;
+    border-radius:8px;
+    font-size:12.5px; font-weight:600;
+    border:0; cursor:pointer;
+    letter-spacing:-0.01em;
+  }
+  .share:hover{ background:#fff; }
+
+  .avatar{
+    width:30px; height:30px; border-radius:50%;
+    background:linear-gradient(135deg, var(--c-east), var(--c-atl) 60%, var(--c-tde));
+    border:1px solid var(--line);
+    display:grid; place-items:center;
+    font-size:11px; font-weight:700; color:var(--ink-0);
+    font-family:var(--sans);
+  }
+
+  /* ─────────────── Graph stage ─────────────── */
+  .stage{
+    grid-area:graph;
+    position:relative;
+    background:
+      radial-gradient(80% 70% at 50% 50%, var(--ink-1), var(--ink-0) 80%);
+    overflow:hidden;
+    border-right:1px solid var(--line-2);
+  }
+  #graph{
+    position:absolute; inset:0;
+    width:100%; height:100%;
+    display:block;
+    cursor:grab;
+  }
+  #graph.dragging{cursor:grabbing;}
+
+  /* concentric guide circles, hand-drawn */
+  .stage::before{
+    content:"";
+    position:absolute; inset:0; pointer-events:none;
+    background-image:
+      radial-gradient(circle at 50% 50%, transparent 0, transparent calc(38% - 1px), rgba(244,237,227,0.025) calc(38% - 1px), rgba(244,237,227,0.025) 38%, transparent 38%),
+      radial-gradient(circle at 50% 50%, transparent 0, transparent calc(60% - 1px), rgba(244,237,227,0.018) calc(60% - 1px), rgba(244,237,227,0.018) 60%, transparent 60%);
+  }
+
+  /* Stage overlays */
+  .stage-overlay{
+    position:absolute; pointer-events:none; z-index:5;
+  }
+
+  /* Top-left: graph title */
+  .ov-title{
+    top:24px; left:28px;
+    max-width:min(380px, 38%);
+  }
+  .ov-eyebrow{
+    font-family:var(--mono); font-size:10px;
+    color:var(--paper-mute); text-transform:uppercase; letter-spacing:0.16em;
+    margin-bottom:6px;
+  }
+  .ov-title h1{
+    font-family:var(--serif);
+    font-weight:400;
+    font-size:clamp(26px, 2.6vw, 42px);
+    line-height:1.02;
+    letter-spacing:-0.02em;
+    color:var(--paper);
+  }
+  .ov-title h1 em{ color:var(--c-east); }
+  .ov-title p{
+    margin-top:10px;
+    font-size:13px;
+    color:var(--paper-dim);
+    max-width:340px;
+    line-height:1.5;
+  }
+
+  /* Bottom-left: controls */
+  .ov-controls{
+    bottom:22px; left:24px;
+    pointer-events:auto;
+    display:flex; flex-direction:column; gap:14px;
+  }
+  .ctl-group{
+    background:rgba(16,16,21,0.7);
+    backdrop-filter:blur(8px);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:8px;
+    display:flex; align-items:center; gap:2px;
+  }
+  .ctl-btn{
+    background:none; border:0; color:var(--paper-mute);
+    padding:6px 9px; border-radius:6px; font-size:12px;
+    font-family:var(--sans); cursor:pointer;
+    display:inline-flex; align-items:center; gap:6px;
+    letter-spacing:-0.005em;
+  }
+  .ctl-btn:hover{ color:var(--paper); background:var(--ink-2); }
+  .ctl-btn.active{ color:var(--paper); background:var(--ink-3); }
+  .ctl-sep{ width:1px; height:18px; background:var(--line); margin:0 4px;}
+
+  .ctl-label{
+    font-family:var(--mono); font-size:9.5px;
+    color:var(--paper-mute); text-transform:uppercase; letter-spacing:0.14em;
+    padding:0 6px 0 8px;
+  }
+
+  /* Bottom-right of stage: legend */
+  .ov-legend{
+    bottom:22px; right:22px;
+    pointer-events:auto;
+    background:rgba(16,16,21,0.7);
+    backdrop-filter:blur(8px);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:12px 14px 12px 14px;
+    min-width:200px;
+  }
+  .ov-legend h4{
+    font-family:var(--mono); font-size:9.5px;
+    color:var(--paper-mute); text-transform:uppercase; letter-spacing:0.14em;
+    margin-bottom:10px; font-weight:500;
+  }
+  .legend-row{
+    display:flex; align-items:center; gap:10px;
+    padding:4px 0;
+    font-size:12px;
+    color:var(--paper-dim);
+    cursor:pointer;
+  }
+  .legend-row:hover{ color:var(--paper);}
+  .legend-row.muted{ opacity:0.4; }
+  .legend-dot{
+    width:9px; height:9px; border-radius:50%;
+    box-shadow:0 0 10px currentColor;
+  }
+  .legend-count{
+    margin-left:auto;
+    font-family:var(--mono); font-size:10.5px;
+    color:var(--paper-mute);
+  }
+
+  /* Stats overlay top right of stage */
+  .ov-stats{
+    top:24px; right:24px;
+    pointer-events:none;
+    display:flex; gap:22px;
+    font-family:var(--mono);
+    background:rgba(10,10,13,0.5);
+    backdrop-filter:blur(8px);
+    padding:8px 14px;
+    border-radius:10px;
+    border:1px solid var(--line-2);
+  }
+  .ov-stat .lbl{
+    font-size:9.5px; text-transform:uppercase; letter-spacing:0.14em;
+    color:var(--paper-mute); margin-bottom:3px;
+  }
+  .ov-stat .val{
+    font-family:var(--serif); font-size:22px; color:var(--paper);
+    letter-spacing:-0.01em;
+    line-height:1;
+  }
+  .ov-stat .delta{
+    font-size:10px; color:var(--c-tde); margin-top:4px;
+  }
+
+  /* hover tooltip */
+  .tooltip{
+    position:absolute; z-index:8;
+    pointer-events:none;
+    background:rgba(10,10,13,0.92);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:8px 10px;
+    font-size:12px;
+    transform:translate(-50%, calc(-100% - 14px));
+    white-space:nowrap;
+    opacity:0; transition:opacity 120ms;
+    backdrop-filter:blur(8px);
+  }
+  .tooltip.on{ opacity:1; }
+  .tooltip .t-name{ color:var(--paper); font-weight:600; letter-spacing:-0.01em;}
+  .tooltip .t-meta{
+    font-family:var(--mono); font-size:10px;
+    color:var(--paper-mute); margin-top:2px;
+  }
+
+  /* ─────────────── Right rail ─────────────── */
+  .rail{
+    grid-area:rail;
+    background:var(--ink-1);
+    overflow-y:auto;
+    display:flex; flex-direction:column;
+  }
+  .rail::-webkit-scrollbar{width:6px;}
+  .rail::-webkit-scrollbar-thumb{background:var(--ink-4); border-radius:3px;}
+
+  /* Selected artist hero */
+  .detail{
+    padding:22px 24px 18px;
+    border-bottom:1px solid var(--line-2);
+    position:relative;
+    overflow:hidden;
+  }
+  .detail::before{
+    content:""; position:absolute; inset:0;
+    background:radial-gradient(80% 70% at 80% 0%, var(--accent), transparent 60%);
+    opacity:0.12;
+    pointer-events:none;
+  }
+  .detail-eye{
+    font-family:var(--mono); font-size:9.5px;
+    color:var(--paper-mute); text-transform:uppercase; letter-spacing:0.16em;
+    display:flex; align-items:center; gap:8px;
+    margin-bottom:10px;
+  }
+  .detail-eye .pulse{
+    width:6px; height:6px; border-radius:50%;
+    background:var(--accent);
+    box-shadow:0 0 8px var(--accent);
+    animation:pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:0.35;} }
+
+  .detail-name{
+    font-family:var(--serif);
+    font-size:42px;
+    line-height:1.0;
+    letter-spacing:-0.02em;
+    font-weight:400;
+    color:var(--paper);
+    margin-bottom:4px;
+  }
+  .detail-cluster{
+    display:inline-flex; align-items:center; gap:6px;
+    font-size:11.5px; color:var(--paper-dim);
+    margin-top:6px;
+  }
+  .detail-cluster .dot{
+    width:7px; height:7px; border-radius:50%; background:var(--accent);
+    box-shadow:0 0 8px var(--accent);
+  }
+  .detail-cluster span.sep{ color:var(--paper-faint); }
+
+  .detail-bars{
+    margin-top:16px;
+    display:grid; grid-template-columns:1fr 1fr 1fr;
+    gap:10px;
+  }
+  .bar-stat{
+    background:var(--ink-2);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:9px 10px;
+  }
+  .bar-stat .l{
+    font-family:var(--mono); font-size:9px;
+    color:var(--paper-mute); text-transform:uppercase; letter-spacing:0.14em;
+  }
+  .bar-stat .v{
+    font-family:var(--serif); font-size:22px;
+    line-height:1.1; color:var(--paper); margin-top:2px;
+    letter-spacing:-0.01em;
+  }
+  .bar-stat .u{
+    font-family:var(--mono); font-size:9px;
+    color:var(--paper-mute); margin-left:2px;
+  }
+
+  /* Listening over time sparkline */
+  .sparkbox{
+    margin-top:16px;
+    background:var(--ink-2);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:12px;
+  }
+  .sparkbox-h{
+    display:flex; justify-content:space-between; align-items:baseline;
+    margin-bottom:8px;
+  }
+  .sparkbox-h .l{
+    font-family:var(--mono); font-size:9.5px;
+    color:var(--paper-mute); text-transform:uppercase; letter-spacing:0.14em;
+  }
+  .sparkbox-h .r{
+    font-family:var(--mono); font-size:10.5px;
+    color:var(--paper-dim);
+  }
+  .sparkbox svg{display:block; width:100%; height:42px;}
+
+  /* Sections */
+  .section{
+    padding:18px 24px;
+    border-bottom:1px solid var(--line-2);
+  }
+  .section:last-child{ border-bottom:0; }
+  .section h3{
+    font-family:var(--mono); font-size:9.5px;
+    color:var(--paper-mute); text-transform:uppercase; letter-spacing:0.16em;
+    font-weight:500;
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:12px;
+  }
+  .section h3 a{
+    color:var(--paper-mute); text-decoration:none; font-size:9.5px;
+    letter-spacing:0.16em;
+  }
+  .section h3 a:hover{ color:var(--paper);}
+
+  /* Top tracks */
+  .track{
+    display:flex; align-items:center; gap:10px;
+    padding:6px 0;
+    font-size:12.5px;
+  }
+  .track-n{
+    font-family:var(--mono); font-size:10px;
+    color:var(--paper-faint); width:18px;
+  }
+  .track-info{ flex:1; min-width:0; }
+  .track-title{
+    color:var(--paper); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    letter-spacing:-0.005em;
+  }
+  .track-sub{
+    font-family:var(--mono); font-size:10px;
+    color:var(--paper-mute);
+  }
+  .track-plays{
+    font-family:var(--mono); font-size:10.5px;
+    color:var(--paper-dim);
+  }
+
+  /* Co-listened artists */
+  .neighbor{
+    display:flex; align-items:center; gap:10px;
+    padding:7px 0; cursor:pointer;
+  }
+  .neighbor:hover .neighbor-name{ color:var(--paper); }
+  .neighbor-dot{
+    width:8px; height:8px; border-radius:50%;
+    box-shadow:0 0 6px currentColor;
+  }
+  .neighbor-name{
+    flex:1; font-size:12.5px; color:var(--paper-dim);
+    letter-spacing:-0.005em;
+  }
+  .neighbor-strength{
+    flex-shrink:0;
+    width:42px; height:3px; background:var(--ink-3);
+    border-radius:2px; overflow:hidden;
+  }
+  .neighbor-strength i{
+    display:block; height:100%; background:currentColor;
+  }
+  .neighbor-score{
+    font-family:var(--mono); font-size:10px;
+    color:var(--paper-mute); width:30px; text-align:right;
+  }
+
+  /* Discovery */
+  .quote{
+    font-family:var(--serif);
+    font-size:16px; font-style:italic;
+    line-height:1.4;
+    color:var(--paper-dim);
+    padding-left:14px;
+    border-left:2px solid var(--accent);
+    letter-spacing:-0.005em;
+  }
+  .quote-attr{
+    margin-top:8px;
+    font-family:var(--mono); font-size:10px;
+    color:var(--paper-mute); text-transform:uppercase; letter-spacing:0.14em;
+    padding-left:14px;
+  }
+
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ════════════ Top bar ════════════ -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+          <circle cx="6" cy="6" r="3.5" fill="#ef8a6b"/>
+          <circle cx="16" cy="7" r="2.5" fill="#e9bd5a"/>
+          <circle cx="7" cy="16" r="2.5" fill="#7fd4a8"/>
+          <circle cx="15.5" cy="15.5" r="3" fill="#9aa9ee"/>
+          <path d="M6 6 L16 7 M6 6 L7 16 M16 7 L15.5 15.5 M7 16 L15.5 15.5" stroke="#f4ede3" stroke-opacity="0.35" stroke-width="0.8"/>
+        </svg>
+      </span>
+      <span class="brand-name">Taste<em>Graph</em></span>
+    </div>
+
+    <nav class="topnav"></nav>
+
+    <div class="search">
+      <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5">
+        <circle cx="6" cy="6" r="4.5"/><path d="m9.5 9.5 3 3"/>
+      </svg>
+      <input placeholder="Find an artist, album, or cluster…"/>
+    </div>
+
+    <button class="iconbtn" title="Refresh from Spotify">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 7a5 5 0 1 1-1.5-3.5"/><path d="M12 2v3h-3"/>
+      </svg>
+    </button>
+    <button class="share">
+      <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M10 4.5a2 2 0 1 0-1.9-2.6L5.4 3.5M4 7a2 2 0 1 0 0 .1zM10 12a2 2 0 1 0-1.9-2.6L5.4 8"/>
+      </svg>
+      Share graph
+    </button>
+  </header>
+
+  <!-- ════════════ Graph stage ════════════ -->
+  <main class="stage">
+    <canvas id="graph"></canvas>
+
+    <div class="stage-overlay ov-stats">
+      <div class="ov-stat">
+        <div class="lbl">Artists</div>
+        <div class="val">24</div>
+      </div>
+      <div class="ov-stat">
+        <div class="lbl">Edges</div>
+        <div class="val">47</div>
+      </div>
+      <div class="ov-stat">
+        <div class="lbl">Clusters</div>
+        <div class="val">4</div>
+        <div class="delta">+1 vs. last month</div>
+      </div>
+    </div>
+
+    <div class="stage-overlay ov-controls">
+      <div class="ctl-group">
+        <span class="ctl-label">Range</span>
+        <button class="ctl-btn">4w</button>
+        <button class="ctl-btn">3m</button>
+        <button class="ctl-btn active">12m</button>
+        <button class="ctl-btn">All</button>
+      </div>
+      <div class="ctl-group">
+        <button class="ctl-btn" id="btn-play" title="Play simulation">
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor"><path d="M2 1.5v8l7-4z"/></svg>
+          Re-simulate
+        </button>
+        <span class="ctl-sep"></span>
+        <button class="ctl-btn" id="btn-zoom-out" title="Zoom out">
+          <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h6"/></svg>
+        </button>
+        <button class="ctl-btn" id="btn-zoom-reset">100%</button>
+        <button class="ctl-btn" id="btn-zoom-in" title="Zoom in">
+          <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 3v6M3 6h6"/></svg>
+        </button>
+        <span class="ctl-sep"></span>
+        <button class="ctl-btn" id="btn-labels" title="Toggle labels">
+          <svg width="12" height="11" viewBox="0 0 14 11" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1.5 2h6M1.5 5.5h11M1.5 9h8"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="stage-overlay ov-legend" id="legend">
+      <h4>Clusters</h4>
+      <!-- populated by JS -->
+    </div>
+
+    <div class="tooltip" id="tip">
+      <div class="t-name"></div>
+      <div class="t-meta"></div>
+    </div>
+  </main>
+
+  <!-- ════════════ Right rail ════════════ -->
+  <aside class="rail" id="rail">
+    <!-- populated by JS -->
+  </aside>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
