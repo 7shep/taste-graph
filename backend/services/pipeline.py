@@ -62,9 +62,10 @@ def _build_session_records(
         artist_sequence: list[str] = []
         for item in session:
             artists = ((item.get("track") or {}).get("artists") or [])
-            artist_id = str(artists[0].get("id") or "") if artists else ""
-            if artist_id:
-                artist_sequence.append(artist_id)
+            for artist in artists:
+                artist_id = str(artist.get("id") or "")
+                if artist_id:
+                    artist_sequence.append(artist_id)
         if artist_sequence:
             records.append(
                 SessionRecord(

@@ -48,8 +48,10 @@ def segment_sessions(
         played_at = _parse_timestamp(str(item.get("played_at")))
         track = item.get("track", {}) or {}
         artists = track.get("artists", []) or []
-        artist_id = str(artists[0].get("id") or "") if artists else ""
-        if not artist_id:
+        artist_ids = [
+            str(artist.get("id") or "") for artist in artists if artist.get("id")
+        ]
+        if not artist_ids:
             continue
 
         if (
@@ -60,7 +62,7 @@ def segment_sessions(
             sessions.append(current_session)
             current_session = []
 
-        current_session.append(artist_id)
+        current_session.extend(artist_ids)
         previous_timestamp = played_at
 
     if current_session:

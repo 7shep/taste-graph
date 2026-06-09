@@ -26,6 +26,27 @@ class SpotifyServiceTests(unittest.TestCase):
 
         self.assertEqual(sessions, [["artist-a", "artist-b"], ["artist-c"]])
 
+    def test_segment_sessions_includes_all_credited_artists(self) -> None:
+        recently_played = [
+            {
+                "played_at": "2026-06-08T10:00:00Z",
+                "track": {
+                    "artists": [
+                        {"id": "imagine-dragons"},
+                        {"id": "jid"},
+                    ]
+                },
+            },
+            {
+                "played_at": "2026-06-08T10:05:00Z",
+                "track": {"artists": [{"id": "artist-b"}]},
+            },
+        ]
+
+        sessions = segment_sessions(recently_played)
+
+        self.assertEqual(sessions, [["imagine-dragons", "jid", "artist-b"]])
+
 
 if __name__ == "__main__":
     unittest.main()
