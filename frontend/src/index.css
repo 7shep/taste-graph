@@ -37,6 +37,10 @@ body {
   overflow: hidden;
 }
 
+a {
+  color: inherit;
+}
+
 body::before {
   content: "";
   position: fixed;
@@ -87,6 +91,88 @@ button {
   display: grid;
   grid-template-rows: 56px minmax(0, 1fr);
   height: 100%;
+}
+
+.tg-home-shell {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  min-height: 100%;
+  padding: 24px;
+}
+
+.tg-home-card {
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  min-width: min(420px, 100%);
+  padding: 32px 28px 28px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background:
+    linear-gradient(180deg, rgba(29, 29, 38, 0.92), rgba(10, 10, 13, 0.9)),
+    radial-gradient(circle at top, rgba(30, 215, 96, 0.12), transparent 45%);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(14px);
+}
+
+.tg-home-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tg-home-back-link {
+  color: var(--paper-dim);
+  text-decoration: none;
+}
+
+.tg-home-back-link:hover {
+  color: var(--paper);
+}
+
+.tg-spotify-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 248px;
+  min-height: 52px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 999px;
+  background: #1ed760;
+  color: #05140b;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  transition:
+    transform 140ms ease,
+    box-shadow 140ms ease,
+    opacity 140ms ease;
+  box-shadow: 0 16px 48px rgba(30, 215, 96, 0.24);
+}
+
+.tg-spotify-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 20px 52px rgba(30, 215, 96, 0.28);
+}
+
+.tg-spotify-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.tg-spotify-button-icon {
+  display: grid;
+  place-items: center;
+}
+
+.tg-home-error {
+  margin: 0;
+  color: #f3b19c;
+  text-align: center;
 }
 
 .tg-topbar {
@@ -647,6 +733,10 @@ button {
 }
 
 @media (max-width: 980px) {
+  body {
+    overflow: auto;
+  }
+
   .tg-layout {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -665,5 +755,22 @@ button {
 
   .tg-stage {
     border-right: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .tg-home-card {
+    min-width: 0;
+    width: 100%;
+    padding: 28px 20px 24px;
+  }
+
+  .tg-home-brand {
+    gap: 10px;
+  }
+
+  .tg-spotify-button {
+    width: 100%;
+    min-width: 0;
   }
 }

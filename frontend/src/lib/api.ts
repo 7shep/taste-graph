@@ -20,17 +20,25 @@ function trimTrailingSlash(value: string) {
   return value.endsWith("/") ? value.slice(0, -1) : value;
 }
 
-function buildGraphUrl(timeRange: TimeRange) {
+function buildApiUrl(endpoint: string) {
   const baseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
-  const endpoint = import.meta.env.VITE_GRAPH_ENDPOINT?.trim() || "/api/graph";
   const path = endpoint.startsWith("http")
     ? endpoint
     : `${baseUrl ? trimTrailingSlash(baseUrl) : ""}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
-  const url = new URL(path, window.location.origin);
+  return new URL(path, window.location.origin);
+}
+
+function buildGraphUrl(timeRange: TimeRange) {
+  const endpoint = import.meta.env.VITE_GRAPH_ENDPOINT?.trim() || "/api/graph";
+  const url = buildApiUrl(endpoint);
 
   url.searchParams.set("time_range", timeRange);
   return url.toString();
 }
+
+export type SpotifyLoginStartResponse = {
+  url: string;
+};
 
 export async function fetchGraphPayload(
   timeRange: TimeRange,
@@ -59,4 +67,29 @@ export async function fetchGraphPayload(
   }
 
   return (await response.json()) as GraphPayload;
+}
+
+export async function getSpotifyLoginUrl(
+  signal?: AbortSignal,
+): Promise<SpotifyLoginStartResponse> {
+  const endpoint =
+    import.meta.env.VITE_SPOTIFY_AUTH_START_ENDPOINT?.trim() ||
+    "/api/auth/spotify/login";
+  const response = await fetch(buildApiUrl(endpoint), {
+    headers: {
+      Accept: "application/json",
+    },
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error("Unable to start Spotify login.");
+  }
+
+  const payload = (await response.json()) as Partial<SpotifyLoginStartResponse>;
+  if (!payload.url || typeof payload.url !== "string") {
+    throw new Error("Spotify login response did not include a redirect URL.");
+  }
+
+  return { url: payload.url };
 }
