@@ -286,6 +286,34 @@ def _build_session_records(
     return records
 
 
+def _artist_name_map(
+    top_artists: list[dict[str, Any]],
+    fetched_artists: list[dict[str, Any]],
+    recently_played_items: list[dict[str, Any]],
+    top_tracks: list[dict[str, Any]],
+) -> dict[str, str]:
+    names: dict[str, str] = {}
+    for artist in [*top_artists, *fetched_artists]:
+        artist_id = str(artist.get("id") or "")
+        name = str(artist.get("name") or "").strip()
+        if artist_id and name:
+            names.setdefault(artist_id, name)
+
+    track_artist_lists = [
+        (item.get("track") or {}).get("artists") or []
+        for item in recently_played_items
+    ]
+    track_artist_lists.extend(track.get("artists", []) or [] for track in top_tracks)
+    for artists in track_artist_lists:
+        for artist in artists:
+            artist_id = str(artist.get("id") or "")
+            name = str(artist.get("name") or "").strip()
+            if artist_id and name:
+                names.setdefault(artist_id, name)
+
+    return names
+
+
 def _top_tracks_by_artist(top_tracks: list[dict[str, Any]]) -> dict[str, list[GraphTrack]]:
     tracks_by_artist: dict[str, list[GraphTrack]] = defaultdict(list)
     total = len(top_tracks)
@@ -484,6 +512,23 @@ class GraphPipeline:
             if artist_id:
                 genres_by_artist[artist_id] = list(artist.get("genres", []) or [])
 
+        # Spotify stopped returning genres to development-mode apps (the batch
+        # /artists endpoint 403s and artist objects omit the field entirely),
+        # so infer genres for any artist still missing them via Gemini.
+        artist_names = _artist_name_map(
+            top_artists, fetched_artists, recently_played, top_tracks
+        )
+        ungenred = [
+            {"id": artist_id, "name": name}
+            for artist_id, name in sorted(artist_names.items())
+            if not genres_by_artist.get(artist_id)
+        ]
+        if ungenred:
+            inferred = self.labeling_service.infer_artist_genres(ungenred)
+            for artist_id, genres in inferred.items():
+                if genres and not genres_by_artist.get(artist_id):
+                    genres_by_artist[artist_id] = list(genres)
+
         embedding_result = train_artist_embeddings(session_sequences, genres_by_artist)
         clustering_result = cluster_artist_embeddings(embedding_result.vectors)
         genre_assignments = _assign_uncategorized_by_genre(
@@ -492,6 +537,9 @@ class GraphPipeline:
         artist_metadata = _artist_metadata(
             recently_played, top_artists, fetched_artists, top_tracks, embedding_result
         )
+        for artist_id, metadata in artist_metadata.items():
+            if not metadata.get("genres"):
+                metadata["genres"] = genres_by_artist.get(artist_id, [])
 
         cluster_members: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for artist_id, metadata in artist_metadata.items():

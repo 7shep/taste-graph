@@ -299,6 +299,53 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(metadata["artist-a"]["play_count"], 1000)
         self.assertEqual(metadata["artist-b"]["play_count"], 83)
 
+    def test_gemini_genres_backfill_when_spotify_returns_none(self) -> None:
+        class GenrelessSpotifyService(FakeSpotifyService):
+            def get_top_artists(self, access_token, time_range):
+                artists = super().get_top_artists(access_token, time_range)
+                for artist in artists:
+                    artist["genres"] = []
+                return artists
+
+            def get_artists(self, access_token, artist_ids):
+                self.requested_artist_ids = list(artist_ids)
+                raise SpotifyAPIError("Forbidden", status_code=403)
+
+        class FakeGenreClient:
+            def __init__(self) -> None:
+                self.requested: list[dict[str, str]] = []
+
+            def generate_genres(self, artists, system_prompt, model):
+                self.requested = list(artists)
+                return {artist["id"]: ["rage rap"] for artist in artists}
+
+        repository = SupabaseRepository()
+        spotify = GenrelessSpotifyService()
+        genre_client = FakeGenreClient()
+        pipeline = GraphPipeline(
+            repository=repository,
+            spotify_service=spotify,
+            labeling_service=ClusterLabelingService(client=genre_client),
+        )
+
+        payload = pipeline.generate_graph(
+            GraphGenerateRequest(
+                user_id="user-5",
+                time_range="medium_term",
+                access_token="token",
+                force_refresh=True,
+            )
+        )
+
+        requested_ids = {artist["id"] for artist in genre_client.requested}
+        self.assertIn("artist-a", requested_ids)
+        self.assertIn("artist-feat", requested_ids)
+        requested_names = {
+            artist["id"]: artist["name"] for artist in genre_client.requested
+        }
+        self.assertEqual(requested_names["artist-feat"], "Featured Artist")
+        self.assertGreater(payload.stats.artists, 0)
+
     def test_uncategorized_artists_are_assigned_by_genre_overlap(self) -> None:
         clustering = ClusteringResult(
             positions={
