@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import os
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 from backend._compat import APIRouter, JSONResponse, RedirectResponse
 from backend.models.schemas import ErrorResponse
@@ -35,8 +35,31 @@ def _decode_state(state: str | None) -> str | None:
     return payload.get("return_to")
 
 
+def _frontend_origin() -> str:
+    return os.getenv("FRONTEND_APP_URL", "http://127.0.0.1:4173")
+
+
 def _fallback_dashboard_url() -> str:
-    return os.getenv("FRONTEND_APP_URL", "http://127.0.0.1:4173") + "/graph"
+    return _frontend_origin() + "/graph"
+
+
+def _safe_return_to(candidate: str | None) -> str:
+    # The callback appends OAuth tokens to this URL's fragment, so an
+    # unvalidated return_to is an open redirect that leaks tokens to an
+    # attacker-controlled site. Only the configured frontend origin (or a
+    # plain relative path on it) is allowed.
+    if not candidate:
+        return _fallback_dashboard_url()
+    parsed = urlparse(candidate)
+    if not parsed.scheme and not parsed.netloc:
+        if candidate.startswith("/") and not candidate.startswith("//"):
+            return _frontend_origin() + candidate
+        return _fallback_dashboard_url()
+    if parsed.scheme in ("http", "https") and parsed.netloc == urlparse(
+        _frontend_origin()
+    ).netloc:
+        return candidate
+    return _fallback_dashboard_url()
 
 
 def _redirect_with_hash(base_url: str, values: dict[str, str]) -> RedirectResponse:
@@ -58,7 +81,7 @@ def start_spotify_login(return_to: str | None = None) -> dict[str, str]:
         )
 
     scope = "user-read-email user-read-recently-played user-top-read"
-    dashboard_url = return_to or _fallback_dashboard_url()
+    dashboard_url = _safe_return_to(return_to)
     query = urlencode(
         {
             "client_id": client_id,
@@ -78,7 +101,7 @@ def finish_spotify_login(
     state: str | None = None,
 ) -> RedirectResponse:
     redirect_uri = os.getenv("SPOTIFY_REDIRECT_URI")
-    return_to = _decode_state(state) or _fallback_dashboard_url()
+    return_to = _safe_return_to(_decode_state(state))
 
     if error:
         return _redirect_with_hash(return_to, {"auth_error": error})
